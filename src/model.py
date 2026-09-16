@@ -41,6 +41,8 @@ class Results:
     status: str
     objective: float
     hourly: pd.DataFrame                   # one row per hour: variables, prices, hourly duals
+    utility: float                         
+    procurement_cost: float                
     duals: dict[str, float] = field(default_factory=dict)   # duals of non-hourly constraints
     meta: dict = field(default_factory=dict)                 # anything else worth keeping (scenario name, ...)
 
@@ -58,7 +60,8 @@ class Results:
     def __str__(self) -> str:
         cols = [c for c in self.hourly.columns if not c.startswith("dual_")]
         return (
-            f"status: {self.status} | objective: {self.objective:.2f} DKK\n"
+            f"status: {self.status} | objective: {self.objective:.2f} DKK "
+            f"(utility: {self.utility:.2f} DKK, procurement cost: {self.procurement_cost:.2f} DKK)\n"
             f"daily totals (kWh): " + ", ".join(f"{c}={self.hourly[c].sum():.1f}" for c in cols if c in ("import", "export", "load", "pv"))
             + (f"\nduals: {self.duals}" if self.duals else "")
         )
@@ -109,11 +112,24 @@ class FlexibleConsumerModel:
         # * naming the families "import", "export", "load", "pv" makes the standard plots of
         #   src/plotting.py work out of the box.
 
+        self.var["load"] = m.addVars(T, lb=0, name="load") 
+        self.var["pv"] = m.addVars(T, lb=0, name="pv")
+        self.var["import"] = m.addVars(T, lb=0, name="import")
+        self.var["export"] = m.addVars(T, lb=0, name="export")
+        
         # --- Objective ---------------------------------------------------------------
         # TODO: express the objective function and its direction (GRB.MINIMIZE or GRB.MAXIMIZE):
         #   m.setObjective(gp.quicksum(<expression in t> for t in T), <direction>)
         # The input-data attributes (with units) are documented in src/data_loader.py (InputData).
 
+        
+        m.setObjective(
+    gp.quicksum(
+        d.consumption_utility*self.var["load"][t]- d.pv_marginal_cost*self.var["pv"][t]-(d.energy_price[t] + d.import_tariff)*self.var["import"][t]+(d.energy_price[t] - d.export_tariff)*self.var["export"][t]
+        for t in T
+    ),
+    GRB.MAXIMIZE
+)
         # --- Constraints -------------------------------------------------------------
         # TODO: add the constraints of your formulation.
         # Pattern for hourly constraints (one per hour, duals returned as a 24-vector; names are
@@ -122,6 +138,13 @@ class FlexibleConsumerModel:
         #       (<lhs expression> - <rhs expression> <= 0 for t in T), name="<name>")
         # Pattern for a single constraint (dual returned as a scalar):
         #   self.con["<name>"] = m.addConstr(<lhs expression> - <rhs expression> <= 0, name="<name>")
+
+        self.con["balance"] = m.addConstrs(
+    (self.var["load"][t] == self.var["pv"][t] + self.var["import"][t] - self.var["export"][t] for t in T), name="balance")
+
+        self.con["pv_limit"] = m.addConstrs((self.var["pv"][t] <= d.pv_available[t] for t in T) , name="pv_limit")
+        self.con["load_min"] = m.addConstrs((self.var["load"][t] >= d.load_min_kWh for t in T) , name="load_min")
+        self.con["load_max"] = m.addConstrs((self.var["load"][t] <= d.load_max_kWh for t in T) , name="load_max")
 
         m.update()
         return self
@@ -167,6 +190,12 @@ class FlexibleConsumerModel:
             except (AttributeError, gp.GurobiError):
                 # No duals available (e.g. model with integer variables)
                 pass
+                
+        utility = (d.consumption_utility * hourly["load"]).sum()
+        procurement_cost = (d.pv_marginal_cost * hourly["pv"]
+            + (hourly["price"] + d.import_tariff) * hourly["import"]
+            - (hourly["price"] - d.export_tariff) * hourly["export"]
+        ).sum()
 
         return Results(
             question=d.question,
@@ -174,6 +203,8 @@ class FlexibleConsumerModel:
             objective=self.m.ObjVal,
             hourly=hourly,
             duals=duals,
+            utility=utility,
+            procurement_cost=procurement_cost,
             meta={"scalar_variables": scalars},
         )
 
