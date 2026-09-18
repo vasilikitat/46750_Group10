@@ -224,6 +224,89 @@ def _status_name(code: int) -> str:
     return _STATUS.get(code, f"STATUS_{code}")
 
 
+class LinearDisutilityModel(FlexibleConsumerModel):
+    """Question 2.(b): linear disutility from deviating (in absolute value) from a reference load profile.
+
+    The non-differentiable |load - reference_load| term is reformulated as an LP using two
+    continuous auxiliary variables, dev_pos and dev_neg (overshoot and undershoot), linked to
+    load via load = reference_load + dev_pos - dev_neg. No complementarity constraint is needed:
+    since both enter the objective with a positive cost, the optimizer never sets both positive.
+    """
+
+    def build(self) -> "LinearDisutilityModel":
+        d, m, T = self.data, self.m, self.T
+
+        self.var["load"] = m.addVars(T, lb=0, name="load")
+        self.var["pv"] = m.addVars(T, lb=0, name="pv")
+        self.var["import"] = m.addVars(T, lb=0, name="import")
+        self.var["export"] = m.addVars(T, lb=0, name="export")
+        self.var["dev_pos"] = m.addVars(T, lb=0, name="dev_pos")
+        self.var["dev_neg"] = m.addVars(T, lb=0, name="dev_neg")
+
+        m.setObjective(
+            gp.quicksum(
+                -d.linear_disutility * (self.var["dev_pos"][t] + self.var["dev_neg"][t])
+                - d.pv_marginal_cost * self.var["pv"][t]
+                - (d.energy_price[t] + d.import_tariff) * self.var["import"][t]
+                + (d.energy_price[t] - d.export_tariff) * self.var["export"][t]
+                for t in T
+            ),
+            GRB.MAXIMIZE
+        )
+
+        self.con["balance"] = m.addConstrs(
+            (self.var["load"][t] == self.var["pv"][t] + self.var["import"][t] - self.var["export"][t] for t in T),
+            name="balance")
+        self.con["pv_limit"] = m.addConstrs((self.var["pv"][t] <= d.pv_available[t] for t in T), name="pv_limit")
+        self.con["load_min"] = m.addConstrs((self.var["load"][t] >= d.load_min_kWh for t in T), name="load_min")
+        self.con["load_max"] = m.addConstrs((self.var["load"][t] <= d.load_max_kWh for t in T), name="load_max")
+        self.con["deviation_link"] = m.addConstrs(
+            (self.var["load"][t] == d.reference_load[t] + self.var["dev_pos"][t] - self.var["dev_neg"][t] for t in T),
+            name="deviation_link")
+
+        m.update()
+        return self
+
+    def _extract_results(self, status: str) -> Results:
+        d, T = self.data, list(self.T)
+        hourly = pd.DataFrame(index=pd.Index(T, name="hour"))
+        hourly["price"] = d.energy_price
+        hourly["pv_available"] = d.pv_available
+        hourly["reference_load"] = d.reference_load
+
+        for name, v in self.var.items():
+            if isinstance(v, gp.tupledict):
+                hourly[name] = [v[t].X for t in T]
+        scalars = {name: v.X for name, v in self.var.items() if isinstance(v, gp.Var)}
+
+        duals: dict[str, float] = {}
+        for name, c in self.con.items():
+            try:
+                if isinstance(c, gp.tupledict):
+                    hourly[f"dual_{name}"] = [_dual(c[t]) for t in T]
+                else:
+                    duals[name] = _dual(c)
+            except (AttributeError, gp.GurobiError):
+                pass
+
+        disutility = (d.linear_disutility * (hourly["dev_pos"] + hourly["dev_neg"])).sum()
+        procurement_cost = (d.pv_marginal_cost * hourly["pv"]
+            + (hourly["price"] + d.import_tariff) * hourly["import"]
+            - (hourly["price"] - d.export_tariff) * hourly["export"]
+        ).sum()
+
+        return Results(
+            question=d.question,
+            status=status,
+            objective=self.m.ObjVal,
+            hourly=hourly,
+            duals=duals,
+            utility=-disutility,
+            procurement_cost=procurement_cost,
+            meta={"scalar_variables": scalars, "disutility": disutility},
+        )
+
+
 class QuadraticDisutilityModel(FlexibleConsumerModel):
     """Question 2.(c): quadratic disutility from deviating from a reference load profile."""
 
