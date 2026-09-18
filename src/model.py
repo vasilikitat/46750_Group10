@@ -112,10 +112,14 @@ class FlexibleConsumerModel:
         # * naming the families "import", "export", "load", "pv" makes the standard plots of
         #   src/plotting.py work out of the box.
 
-        self.var["load"] = m.addVars(T, lb=0, name="load") 
+        self.var["load"] = m.addVars(T, lb=0, name="load")
+        # how much to consume 
         self.var["pv"] = m.addVars(T, lb=0, name="pv")
+        # how much to use from the sun
         self.var["import"] = m.addVars(T, lb=0, name="import")
+        # how much to buy
         self.var["export"] = m.addVars(T, lb=0, name="export")
+        #how much to sell
         
         # --- Objective ---------------------------------------------------------------
         # TODO: express the objective function and its direction (GRB.MINIMIZE or GRB.MAXIMIZE):
@@ -218,3 +222,75 @@ _STATUS = {
 
 def _status_name(code: int) -> str:
     return _STATUS.get(code, f"STATUS_{code}")
+
+
+class QuadraticDisutilityModel(FlexibleConsumerModel):
+    """Question 2.(c): quadratic disutility from deviating from a reference load profile."""
+
+    def build(self) -> "QuadraticDisutilityModel":
+        d, m, T = self.data, self.m, self.T
+
+        self.var["load"] = m.addVars(T, lb=0, name="load")
+        self.var["pv"] = m.addVars(T, lb=0, name="pv")
+        self.var["import"] = m.addVars(T, lb=0, name="import")
+        self.var["export"] = m.addVars(T, lb=0, name="export")
+
+        m.setObjective(
+            gp.quicksum(
+                -d.quadratic_disutility*(self.var["load"][t] - d.reference_load[t])**2
+                - d.pv_marginal_cost*self.var["pv"][t]
+                - (d.energy_price[t] + d.import_tariff)*self.var["import"][t]
+                + (d.energy_price[t] - d.export_tariff)*self.var["export"][t]
+                for t in T
+            ),
+            GRB.MAXIMIZE
+        )
+
+        self.con["balance"] = m.addConstrs(
+            (self.var["load"][t] == self.var["pv"][t] + self.var["import"][t] - self.var["export"][t] for t in T),
+            name="balance")
+        self.con["pv_limit"] = m.addConstrs((self.var["pv"][t] <= d.pv_available[t] for t in T), name="pv_limit")
+        self.con["load_min"] = m.addConstrs((self.var["load"][t] >= d.load_min_kWh for t in T), name="load_min")
+        self.con["load_max"] = m.addConstrs((self.var["load"][t] <= d.load_max_kWh for t in T), name="load_max")
+
+        m.update()
+        return self
+    
+    def _extract_results(self, status: str) -> Results:
+        d, T = self.data, list(self.T)
+        hourly = pd.DataFrame(index=pd.Index(T, name="hour"))
+        hourly["price"] = d.energy_price
+        hourly["pv_available"] = d.pv_available
+        hourly["reference_load"] = d.reference_load
+
+        for name, v in self.var.items():
+            if isinstance(v, gp.tupledict):
+                hourly[name] = [v[t].X for t in T]
+        scalars = {name: v.X for name, v in self.var.items() if isinstance(v, gp.Var)}
+
+        duals: dict[str, float] = {}
+        for name, c in self.con.items():
+            try:
+                if isinstance(c, gp.tupledict):
+                    hourly[f"dual_{name}"] = [_dual(c[t]) for t in T]
+                else:
+                    duals[name] = _dual(c)
+            except (AttributeError, gp.GurobiError):
+                pass
+
+        disutility = (d.quadratic_disutility * (hourly["load"] - hourly["reference_load"])**2).sum()
+        procurement_cost = (d.pv_marginal_cost * hourly["pv"]
+            + (hourly["price"] + d.import_tariff) * hourly["import"]
+            - (hourly["price"] - d.export_tariff) * hourly["export"]
+        ).sum()
+
+        return Results(
+            question=d.question,
+            status=status,
+            objective=self.m.ObjVal,
+            hourly=hourly,
+            duals=duals,
+            utility=-disutility,
+            procurement_cost=procurement_cost,
+            meta={"scalar_variables": scalars, "disutility": disutility},
+        )
