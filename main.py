@@ -16,7 +16,7 @@ import matplotlib
 
 from src.data_loader import load_question, list_questions
 from src.model import FlexibleConsumerModel, Results
-from src.plotting import plot_duals, plot_inputs, plot_scenario_comparison, plot_schedule
+from src.plotting import plot_duals, plot_inputs, plot_scenario_comparison, plot_schedule, plot_results_overview
 from src.scenarios import scale_prices, scale_pv, set_tariffs
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -37,6 +37,7 @@ def run_base_case(question: str, out: Path, show: bool) -> Results | None:
     print(results, "\n")
     results.save(out)
     plot_schedule(results, data, save_to=out / "schedule.png")
+    plot_results_overview(results, data, save_to=out / "results_overview.png")
     plot_duals(results, data, save_to=out / "duals.png")
     if show:
         matplotlib.pyplot.show()
@@ -65,10 +66,12 @@ def run_scenarios(question: str, out: Path) -> dict[str, Results]:
 
 
 def main() -> None:
+    
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--question", default="Q1_caseA", choices=list_questions(), help="data case to use")
     parser.add_argument("--scenarios", action="store_true", help="also run the example sensitivity scenarios")
     parser.add_argument("--show", action="store_true", help="open the figures in a window")
+    
     args = parser.parse_args()
 
     out = RESULTS_DIR / args.question

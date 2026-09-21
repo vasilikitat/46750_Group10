@@ -148,8 +148,7 @@ class FlexibleConsumerModel:
 
         self.con["pv_limit"] = m.addConstrs((self.var["pv"][t] <= d.pv_available[t] for t in T) , name="pv_limit")
         self.con["load_min"] = m.addConstrs((self.var["load"][t] >= d.load_min_kWh for t in T) , name="load_min")
-        self.con["load_max"] = m.addConstrs((self.var["load"][t] <= d.load_max_kWh for t in T) , name="load_max")
-
+        self.con["load_max"] = m.addConstrs((self.var["load"][t] <= d.load_max_kWh for t in T) , name="load_max")        
         m.update()
         return self
 
