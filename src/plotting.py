@@ -9,6 +9,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 
 from .data_loader import InputData
 from .model import Results
@@ -111,6 +112,31 @@ def plot_scenario_comparison(
     ax.set(ylabel=ylabel, title=f"Scenario comparison - {metric}")
     ax.tick_params(axis="x", rotation=20)
     return _finish(fig, save_to)
+
+def plot_sweep(df: pd.DataFrame, data: InputData, param_col: str = "c_L", save_to: Path | str | None = None) -> plt.Figure:
+    """Line plots of summary metrics against c^L parameter,
+    with vertical markers at the smallest/largest effective import and export prices, which
+    bound the c^L thresholds where the optimal load's behaviour changes."""
+    metrics = ["procurement_cost", "disutility", "daily_load", "total_deviation"]
+    titles = ["Procurement cost [DKK]", "Disutility [DKK]", "Daily load [kWh]", "Total deviation [kWh]"]
+
+    lo = (data.energy_price - data.export_tariff).min()
+    hi = (data.energy_price + data.import_tariff).max()
+
+    fig, axes = plt.subplots(2, 2, figsize=(11, 7))
+    axes = axes.flatten()
+
+    for ax, metric, title in zip(axes, metrics, titles):
+        ax.plot(df[param_col], df[metric], "o-", color="C0")
+        ax.axvline(lo, color="grey", ls=":", lw=1, label="min (price - export tariff)")
+        ax.axvline(hi, color="grey", ls="--", lw=1, label="max (price + import tariff)")
+        ax.set(xlabel=param_col, ylabel=title, title=title)
+
+    axes[0].legend(fontsize=7)
+    fig.suptitle("Sweep over " + param_col, fontsize=11)
+    return _finish(fig, save_to)
+
+
 def plot_results_overview(
     results: Results,
     data: InputData,
