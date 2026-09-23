@@ -169,8 +169,15 @@ def plot_results_overview(
         3, 1, figsize=(13, 11), sharex=True
     )
     # Identify pricing regimes
-    high_utility_regime = data.consumption_utility > import_price
-    low_utility_regime = data.consumption_utility < export_price
+    # For Q2/Q3 (disutility-based models), consumption_utility is None: skip the
+    # regime comparison entirely rather than crash, and shade nothing.
+    has_utility = data.consumption_utility is not None
+    if has_utility:
+        high_utility_regime = data.consumption_utility > import_price
+        low_utility_regime = data.consumption_utility < export_price
+    else:
+        high_utility_regime = np.zeros_like(h, dtype=bool)
+        low_utility_regime = np.zeros_like(h, dtype=bool)
     
     # Shade hourly regions
     high_label_added = False
@@ -395,17 +402,18 @@ def plot_results_overview(
         linewidth=1.8,
         label="Export price",
     )
-
-    # Utility of consumption
-    ax2.hlines(
-        data.consumption_utility,
-        edges[0],
-        edges[-1],
-        colors="blue",
-        linestyles="-.",
-        linewidth=1.6,
-        label="Consumption utility",
-    )
+    
+    # Utility of consumption - only for Q1-style data (see has_utility above)
+    if has_utility:
+        ax2.hlines(
+            data.consumption_utility,
+            edges[0],
+            edges[-1],
+            colors="blue",
+            linestyles="-.",
+            linewidth=1.6,
+            label="Consumption utility",
+        )
 
     # PV marginal production cost
     ax2.hlines(
