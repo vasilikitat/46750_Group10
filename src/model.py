@@ -376,3 +376,18 @@ class QuadraticDisutilityModel(FlexibleConsumerModel):
             procurement_cost=procurement_cost,
             meta={"scalar_variables": scalars, "disutility": disutility},
         )
+
+class MinEnergyConsumerModel(QuadraticDisutilityModel):
+    """Question 3(a)/(d): Q2(c) plus a minimum total daily energy requirement."""
+
+    def build(self) -> "MinEnergyConsumerModel":
+        super().build()
+        d, m, T = self.data, self.m, self.T
+
+        self.con["min_daily_energy"] = m.addConstr(
+            gp.quicksum(self.var["load"][t] for t in T) >= d.min_daily_energy_kWh,
+            name="min_daily_energy"
+        )
+
+        m.update()
+        return self

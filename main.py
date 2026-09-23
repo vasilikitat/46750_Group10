@@ -17,19 +17,33 @@ import numpy as np
 import pandas as pd
 
 from src.data_loader import load_question, list_questions
-from src.model import FlexibleConsumerModel, Results, LinearDisutilityModel
+from src.model import FlexibleConsumerModel, LinearDisutilityModel, QuadraticDisutilityModel, MinEnergyConsumerModel, Results
 from src.plotting import plot_duals, plot_inputs, plot_scenario_comparison, plot_schedule, plot_results_overview, plot_sweep
 from src.scenarios import scale_prices, scale_pv, set_tariffs, set_linear_disutility
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
+def select_model(data):
+    """Pick the correct model class according to the case data needed."""
+    if data.min_daily_energy_kWh is not None:
+        return MinEnergyConsumerModel        # Q3
+    if data.quadratic_disutility is not None:
+        return QuadraticDisutilityModel      # Q2_quadratic
+    if data.linear_disutility is not None:
+        return LinearDisutilityModel         # Q2_linear
+    return FlexibleConsumerModel             # Q1_caseA, Q1_caseB
 
 def run_base_case(question: str, out: Path, show: bool) -> Results | None:
     data = load_question(question)
     print(data.summary(), "\n")
     plot_inputs(data, save_to=out / "inputs.png")
 
-    model = FlexibleConsumerModel(data).build()
+    #Hardcode propably?
+    #model = FlexibleConsumerModel(data).build()
+
+    model_cls = select_model(data)
+    model = model_cls(data).build()
+
     try:
         results = model.solve()
     except NotImplementedError as e:
