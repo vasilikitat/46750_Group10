@@ -18,7 +18,7 @@ import pandas as pd
 
 from src.data_loader import load_question, list_questions
 from src.model import FlexibleConsumerModel, LinearDisutilityModel, QuadraticDisutilityModel, MinEnergyConsumerModel, Results
-from src.plotting import plot_duals, plot_inputs, plot_scenario_comparison, plot_schedule, plot_results_overview, plot_sweep
+from src.plotting import plot_duals, plot_inputs, plot_scenario_comparison, plot_schedule, plot_results_overview, plot_sweep, Emin_sensitivity, plot_Emin_vs_unconstrained
 from src.scenarios import scale_prices, scale_pv, set_tariffs, set_linear_disutility
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -103,6 +103,21 @@ def sweep_linear_disutility(base_question: str = "Q2_linear", c_L_values=None) -
 
     return pd.DataFrame(rows)
 
+def sweep_min_daily_energy(question: str, out: Path) -> None:
+    """Sensitivity analysis on E^min for Question 3.(f): lambda_t, mu and net utility vs E^min."""
+    data = load_question(question)
+    fig, df_Emin, regimes = Emin_sensitivity(
+        data,
+        c_Q=data.quadratic_disutility,     # the Q3 c^Q from the data -> free_hours column
+        quadratic_factor=2.0,              # 2 for c^Q (l - l_ref)^2, 1 for 1/2 c^Q (l - l_ref)^2
+        save_to=out / "Emin_sweep.png",
+    )
+    df_Emin.to_csv(out / "Emin_sweep.csv", index=False)
+    regimes.to_csv(out / "Emin_regimes.csv", index=False)
+    print("\n--- E^min regimes ---")
+    print(regimes.round(3).to_string(index=False))
+    matplotlib.pyplot.close(fig)
+
 
 def main() -> None:
     
@@ -127,6 +142,11 @@ def main() -> None:
         sweep_df = sweep_linear_disutility()
         sweep_df.to_csv(out / "cL_sweep.csv", index=False)
         plot_sweep(sweep_df, base_data, save_to=out / "cL_sweep.png")
+    if base is not None and select_model(load_question(args.question)) is MinEnergyConsumerModel:
+        data_q3 = load_question(args.question)
+        results_2c = QuadraticDisutilityModel(data_q3).build().solve()   # same data, no E^min
+        plot_Emin_vs_unconstrained(base, results_2c, data_q3, save_to=out / "schedule_vs_2c.png")
+        sweep_min_daily_energy(args.question, out)
     print(f"\nOutputs written to {out}")
 
 
