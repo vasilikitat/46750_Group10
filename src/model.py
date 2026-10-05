@@ -391,3 +391,54 @@ class MinEnergyConsumerModel(QuadraticDisutilityModel):
 
         m.update()
         return self
+
+class BatteryConsumerModel(MinEnergyConsumerModel):
+
+    """Question 3(g): Q3 consumer plus a small battery (charging, discharging, state of charge)."""
+
+    def build(self) -> "BatteryConsumerModel":
+        super().build()
+        d, m, T = self.data, self.m, self.T
+
+        # --- Battery decision variables (kW for power, kWh for energy)
+        self.var["charge"] = m.addVars(T, lb=0, name="charge")        # p_t^ch
+        self.var["discharge"] = m.addVars(T, lb=0, name="discharge")  # p_t^dis
+        self.var["soc"] = m.addVars(T, lb=0, name="soc")              # e_t, SoC at the end of hour t
+
+        # --- Power balance with the battery: replaces the balance built in Q2(c)/Q3
+
+        m.remove(list(self.con["balance"].values()))
+        self.con["balance"] = m.addConstrs(
+            (self.var["load"][t] == self.var["pv"][t] + self.var["import"][t] - self.var["export"][t]
+             + self.var["discharge"][t] - self.var["charge"][t] for t in T),
+            name="balance")
+        
+        # --- State-of-charge dynamics (t = 0 starts from the initial SoC E_0)
+
+        eta_ch, eta_dis = d.battery_charging_efficiency, d.battery_discharging_efficiency
+        self.con["soc_dynamics"] = m.addConstrs(
+            (self.var["soc"][t]
+             == (d.battery_initial_soc_kWh if t == 0 else self.var["soc"][t - 1])
+             + eta_ch * self.var["charge"][t] - self.var["discharge"][t] / eta_dis
+             for t in T),
+            name="soc_dynamics")
+
+        # --- Battery power and energy bounds (lower bounds 0 are set by lb=0 in the variables)
+        
+        self.con["charge_max"] = m.addConstrs(
+            (self.var["charge"][t] <= d.battery_max_charge_kW for t in T), name="charge_max")
+        self.con["discharge_max"] = m.addConstrs(
+            (self.var["discharge"][t] <= d.battery_max_discharge_kW for t in T), name="discharge_max")
+        self.con["soc_max"] = m.addConstrs(
+            (self.var["soc"][t] <= d.battery_capacity_kWh for t in T), name="soc_max")
+
+        # --- End-of-horizon condition: end the day with at least the initial SoC (E_end = E_0)
+        last = T[-1]
+        self.con["soc_end"] = m.addConstr(
+            self.var["soc"][last] >= d.battery_initial_soc_kWh, name="soc_end")
+
+        m.update()
+        return self
+
+
+        

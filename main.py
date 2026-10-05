@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 
 from src.data_loader import load_question, list_questions
-from src.model import FlexibleConsumerModel, LinearDisutilityModel, QuadraticDisutilityModel, MinEnergyConsumerModel, Results
+from src.model import FlexibleConsumerModel, LinearDisutilityModel, QuadraticDisutilityModel, MinEnergyConsumerModel, BatteryConsumerModel, Results
 from src.plotting import plot_duals, plot_inputs, plot_scenario_comparison, plot_schedule, plot_results_overview, plot_sweep, Emin_sensitivity, plot_Emin_vs_unconstrained
 from src.scenarios import scale_prices, scale_pv, set_tariffs, set_linear_disutility
 
@@ -25,6 +25,8 @@ RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
 def select_model(data):
     """Pick the correct model class according to the case data needed."""
+    if data.battery_capacity_kWh is not None:
+        return BatteryConsumerModel          # Q3_battery
     if data.min_daily_energy_kWh is not None:
         return MinEnergyConsumerModel        # Q3
     if data.quadratic_disutility is not None:
