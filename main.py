@@ -18,8 +18,8 @@ import pandas as pd
 
 from src.data_loader import load_question, list_questions
 from src.model import FlexibleConsumerModel, LinearDisutilityModel, QuadraticDisutilityModel, MinEnergyConsumerModel, BatteryConsumerModel, Results
-from src.plotting import plot_duals, plot_inputs, plot_scenario_comparison, plot_schedule, plot_results_overview, plot_sweep, Emin_sensitivity, plot_Emin_vs_unconstrained
-from src.scenarios import scale_prices, scale_pv, set_tariffs, set_linear_disutility
+from src.plotting import plot_duals, plot_inputs, plot_scenario_comparison, plot_schedule, plot_results_overview, plot_sweep, Emin_sensitivity, plot_Emin_vs_unconstrained, plot_sweep_quadratic
+from src.scenarios import scale_prices, scale_pv, set_tariffs, set_linear_disutility, set_quadratic_disutility
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
@@ -94,13 +94,48 @@ def sweep_linear_disutility(base_question: str = "Q2_linear", c_L_values=None) -
         data = set_linear_disutility(base, c_L=c_L)
         results = LinearDisutilityModel(data).build().solve()
 
+        at_min = np.isclose(results.hourly["load"], data.load_min_kWh, atol=1e-4)
+        wants_more = results.hourly["reference_load"] > data.load_min_kWh
+
         rows.append({
             "c_L": c_L,
             "procurement_cost": results.procurement_cost,
             "disutility": results.meta["disutility"],
             "daily_load": results.hourly["load"].sum(),
+            "daily_pv": results.hourly["pv"].sum(),
+            "daily_import": results.hourly["import"].sum(),
+            "daily_export": results.hourly["export"].sum(),
             "total_deviation": (results.hourly["dev_pos"] + results.hourly["dev_neg"]).sum(),
-            "hours_load_min_binding": int(np.isclose(results.hourly["load"], data.load_min_kWh).sum()),
+            "hours_load_min_binding": int((at_min & wants_more).sum()),
+        })
+
+    return pd.DataFrame(rows)
+
+
+def sweep_quadratic_disutility(base_question: str = "Q2_quadratic", c_Q_values=None) -> pd.DataFrame:
+    """Sweep the quadratic disutility coefficient c^Q and report summary metrics per run (Question 2.c.iv)."""
+    base = load_question(base_question)
+    if c_Q_values is None:
+        c_Q_values = np.geomspace(0.01, 20, 30)
+
+    rows = []
+    for c_Q in c_Q_values:
+        data = set_quadratic_disutility(base, c_Q=c_Q)
+        results = QuadraticDisutilityModel(data).build().solve()
+
+        at_min = np.isclose(results.hourly["load"], data.load_min_kWh, atol=1e-4)
+        wants_more = results.hourly["reference_load"] > data.load_min_kWh
+
+        rows.append({
+            "c_Q": c_Q,
+            "procurement_cost": results.procurement_cost,
+            "disutility": results.meta["disutility"],
+            "daily_load": results.hourly["load"].sum(),
+            "daily_pv": results.hourly["pv"].sum(),
+            "daily_import": results.hourly["import"].sum(),
+            "daily_export": results.hourly["export"].sum(),
+            "total_deviation": (results.hourly["load"] - results.hourly["reference_load"]).abs().sum(),
+            "hours_load_min_binding": int((at_min & wants_more).sum()),
         })
 
     return pd.DataFrame(rows)
@@ -126,7 +161,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--question", default="Q1_caseA", choices=list_questions(), help="data case to use")
     parser.add_argument("--scenarios", action="store_true", help="also run the example sensitivity scenarios")
-    parser.add_argument("--sweep", action="store_true", help="also run the c^L sweep for Question 2.(b).iv")
+    parser.add_argument("--sweep", action="store_true", help="also run the c_L (Q2_linear) or c_Q (Q2_quadratic) sweep for Question 2.(b).iv / 2.(c).iv")
     parser.add_argument("--show", action="store_true", help="open the figures in a window")
     
     args = parser.parse_args()
@@ -140,10 +175,15 @@ def main() -> None:
     if args.scenarios and base is not None:
         run_scenarios(args.question, out)
     if args.sweep:
-        base_data = load_question("Q2_linear")
-        sweep_df = sweep_linear_disutility()
-        sweep_df.to_csv(out / "cL_sweep.csv", index=False)
-        plot_sweep(sweep_df, base_data, save_to=out / "cL_sweep.png")
+        if args.question == "Q2_quadratic":
+            sweep_df = sweep_quadratic_disutility()
+            sweep_df.to_csv(out / "cQ_sweep.csv", index=False)
+            plot_sweep_quadratic(sweep_df, load_question("Q2_quadratic"), save_to=out / "cQ_sweep.png")
+        else:
+            base_data = load_question("Q2_linear")
+            sweep_df = sweep_linear_disutility()
+            sweep_df.to_csv(out / "cL_sweep.csv", index=False)
+            plot_sweep(sweep_df, base_data, save_to=out / "cL_sweep.png")
     if base is not None and select_model(load_question(args.question)) is MinEnergyConsumerModel:
         data_q3 = load_question(args.question)
         results_2c = QuadraticDisutilityModel(data_q3).build().solve()   # same data, no E^min

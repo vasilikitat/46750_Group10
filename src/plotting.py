@@ -137,6 +137,50 @@ def plot_sweep(df: pd.DataFrame, data: InputData, param_col: str = "c_L", save_t
     return _finish(fig, save_to)
 
 
+def plot_sweep_quadratic(df: pd.DataFrame, data: InputData, save_to: Path | str | None = None) -> plt.Figure:
+    """Summary metrics against c^Q (log x-axis) for Question 2.(c).iv.
+
+    The vertical lines mark the smallest and largest c^Q at which an hour with a
+    positive reference leaves the lower load bound: c^Q = m_t / (2 (l_ref_t - L_min)),
+    where m_t = max(c^PV, p_t - tau_exp) if PV is available in hour t,
+    otherwise p_t + tau_imp."""
+    price = np.asarray(data.energy_price, dtype=float)
+    ref = np.asarray(data.reference_load, dtype=float)
+    pv_avail = np.asarray(data.pv_available, dtype=float)
+    lam = np.where(
+        pv_avail > 0,
+        np.maximum(data.pv_marginal_cost, price - data.export_tariff),
+        price + data.import_tariff,
+    )
+    wants_more = ref > data.load_min_kWh
+    thresholds = lam[wants_more] / (2.0 * (ref[wants_more] - data.load_min_kWh))
+    c_first, c_last = thresholds.min(), thresholds.max()
+
+    panels = [
+        ("procurement_cost", "Procurement cost [DKK]"),
+        ("disutility", "Disutility [DKK]"),
+        ("daily_load", "Daily load [kWh]"),
+        ("total_deviation", "Total absolute deviation [kWh]"),
+        ("hours_load_min_binding", "Hours with load at L_min (ref > L_min)"),
+    ]
+    fig, axes = plt.subplots(3, 2, figsize=(11, 10))
+    axes = axes.flatten()
+    for ax, (col, title) in zip(axes, panels):
+        ax.plot(df["c_Q"], df[col], "o-", color="C0", ms=4)
+        ax.axvline(c_first, color="grey", ls=":", lw=1, label=f"first exit ({c_first:.3f})")
+        ax.axvline(c_last, color="grey", ls="--", lw=1, label=f"last exit ({c_last:.2f})")
+        ax.set(xscale="log", xlabel="c_Q [DKK/kWh$^2$]", ylabel=title, title=title)
+    ax = axes[5]
+    for col, label in [("daily_pv", "PV"), ("daily_import", "import"), ("daily_export", "export")]:
+        ax.plot(df["c_Q"], df[col], "o-", ms=4, label=label)
+    ax.set(xscale="log", xlabel="c_Q [DKK/kWh$^2$]", ylabel="Energy [kWh]", title="PV, import and export [kWh]")
+    ax.legend(fontsize=7)
+    axes[0].legend(fontsize=7)
+    fig.suptitle("Sweep over c_Q (Question 2.(c).iv)", fontsize=11)
+    fig.tight_layout()
+    return _finish(fig, save_to)
+
+
 def plot_results_overview(
     results: Results,
     data: InputData,
