@@ -74,3 +74,7 @@ def set_load_preferences(
 def set_linear_disutility(data: InputData, c_L: float) -> InputData:
     """Override the linear disutility coefficient c^L (DKK/kWh), for Question 2.(b)."""
     return replace(data, linear_disutility=c_L)
+
+def set_quadratic_disutility(data: InputData, c_Q: float) -> InputData:
+    """Override the quadratic disutility coefficient c^Q (DKK/kWh^2), for Question 2.(c)."""
+    return replace(data, quadratic_disutility=c_Q)

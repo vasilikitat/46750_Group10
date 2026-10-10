@@ -17,5 +17,6 @@ print(results.hourly[["load", "reference_load", "dev_pos", "dev_neg", "pv", "imp
 plot_schedule(results, data, save_to=out / "schedule_q2b.png")
 
 sweep_df = sweep_linear_disutility()
+print(sweep_df.round(3).to_string())
 sweep_df.to_csv(out / "cL_sweep.csv", index=False)
 plot_sweep(sweep_df, data, save_to=out / "cL_sweep.png")
